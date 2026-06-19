@@ -72,6 +72,22 @@ fyne-cross darwin  -arch=amd64,arm64 ./cmd/client-gui
 2. 在你家主機開 **client GUI**，填 server 位址、相同的密鑰、本機服務（例如 `127.0.0.1:25565`）、遠端端口，按**啟動**。
 3. 兩邊視窗下方都會即時顯示日誌；按**停止**或關閉視窗即中止。
 
+### macOS 第一次開啟
+
+Release 的 macOS GUI 是 **universal `.app`**（Intel + Apple Silicon 通用），下載 `*-darwin-universal.app.zip`，解壓得到 `Tunnel Client.app` / `Tunnel Server.app`。
+
+因為沒有付費的 Apple 開發者簽章/公證，第一次開啟會被 Gatekeeper 攔。任選一種方式放行（只需做一次）：
+
+- **右鍵打開**：在 Finder 對 `.app` 按右鍵 →「打開」→ 再點一次「打開」。
+- 或在系統設定 → **隱私權與安全性**，點「仍要打開」。
+- 或用終端機移除隔離標記：
+
+  ```bash
+  xattr -dr com.apple.quarantine "Tunnel Client.app"
+  ```
+
+`.app` 已做 ad-hoc 簽章，所以不會再出現「已損毀」的訊息。
+
 ## 使用（命令列）
 
 ### 1. 在公網伺服器（example.com）上跑 server

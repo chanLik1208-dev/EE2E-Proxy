@@ -52,16 +52,49 @@ jobs:
           CGO_ENABLED: '1'
         run: |
           mkdir -p out
-          build() { # build <label> <ext>
-            go build -trimpath -ldflags "-s -w" -o "out/server-gui-$1$2" ./cmd/server-gui
-            go build -trimpath -ldflags "-s -w" -o "out/client-gui-$1$2" ./cmd/client-gui
+
+          # Linux / Windows：直接產出原生執行檔。
+          build() { # build <cmd> <out>
+            go build -trimpath -ldflags "-s -w" -o "out/$2" "$1"
           }
+
+          # macOS：合成 arm64+amd64 通用二進位，包成 ad-hoc 簽章的 .app 再壓成 zip。
+          # ad-hoc 簽章可消除 Apple Silicon「已損毀」的問題；首次開啟仍需右鍵→打開一次。
+          mkapp() { # mkapp <顯示名> <cmd> <bundle-id> <執行檔名>
+            local name="$1" cmd="$2" bid="$3" bin="$4"
+            GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o "/tmp/$bin-arm64" "$cmd"
+            GOARCH=amd64 CGO_CFLAGS="-arch x86_64" CGO_LDFLAGS="-arch x86_64" \
+              go build -trimpath -ldflags "-s -w" -o "/tmp/$bin-amd64" "$cmd"
+            lipo -create -output "/tmp/$bin" "/tmp/$bin-arm64" "/tmp/$bin-amd64"
+
+            local app="out/$name.app"
+            mkdir -p "$app/Contents/MacOS"
+            cp "/tmp/$bin" "$app/Contents/MacOS/$bin"
+            cat > "$app/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>$name</string>
+            <key>CFBundleDisplayName</key><string>$name</string>
+            <key>CFBundleExecutable</key><string>$bin</string>
+            <key>CFBundleIdentifier</key><string>$bid</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleVersion</key><string>${GITHUB_REF_NAME#v}</string>
+            <key>CFBundleShortVersionString</key><string>${GITHUB_REF_NAME#v}</string>
+            <key>LSMinimumSystemVersion</key><string>10.13</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+            codesign --force --deep --sign - "$app"
+            ( cd out && zip -qry "$bin-darwin-universal.app.zip" "$name.app" && rm -rf "$name.app" )
+          }
+
           case "${{ runner.os }}" in
-            Linux)   build linux-amd64 '' ;;
-            Windows) build windows-amd64 .exe ;;
+            Linux)   build ./cmd/server-gui server-gui-linux-amd64;   build ./cmd/client-gui client-gui-linux-amd64 ;;
+            Windows) build ./cmd/server-gui server-gui-windows-amd64.exe; build ./cmd/client-gui client-gui-windows-amd64.exe ;;
             macOS)
-              GOARCH=arm64 build darwin-arm64 ''
-              GOARCH=amd64 CGO_CFLAGS="-arch x86_64" CGO_LDFLAGS="-arch x86_64" build darwin-amd64 ''
+              mkapp "Tunnel Server" ./cmd/server-gui com.ee2e.tunnel.server server-gui
+              mkapp "Tunnel Client" ./cmd/client-gui com.ee2e.tunnel.client client-gui
               ;;
           esac
       - uses: actions/upload-artifact@v4

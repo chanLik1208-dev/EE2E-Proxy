@@ -1,0 +1,10 @@
+# 編譯產物
+/dist/
+/server
+/client
+/server-gui
+/client-gui
+*.exe
+
+# 系統 / 編輯器
+.DS_Store

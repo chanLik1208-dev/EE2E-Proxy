@@ -28,15 +28,13 @@ jobs:
           path: dist/*
 
   # GUI 版：Fyne 需要 CGO 與系統圖形函式庫，在各平台原生 runner 上編譯。
+  # macOS 用 Apple Silicon runner 同時產出 arm64 與 amd64（透過 clang 的 -arch 交叉編譯），
+  # 避開稀缺的 Intel mac runner。
   gui:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { runner: ubuntu-latest, label: linux-amd64,  ext: '' }
-          - { runner: macos-14,      label: darwin-arm64, ext: '' }
-          - { runner: macos-13,      label: darwin-amd64, ext: '' }
-          - { runner: windows-latest, label: windows-amd64, ext: '.exe' }
+        runner: [ubuntu-latest, macos-14, windows-latest]
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -54,11 +52,21 @@ jobs:
           CGO_ENABLED: '1'
         run: |
           mkdir -p out
-          go build -trimpath -ldflags "-s -w" -o "out/server-gui-${{ matrix.label }}${{ matrix.ext }}" ./cmd/server-gui
-          go build -trimpath -ldflags "-s -w" -o "out/client-gui-${{ matrix.label }}${{ matrix.ext }}" ./cmd/client-gui
+          build() { # build <label> <ext>
+            go build -trimpath -ldflags "-s -w" -o "out/server-gui-$1$2" ./cmd/server-gui
+            go build -trimpath -ldflags "-s -w" -o "out/client-gui-$1$2" ./cmd/client-gui
+          }
+          case "${{ runner.os }}" in
+            Linux)   build linux-amd64 '' ;;
+            Windows) build windows-amd64 .exe ;;
+            macOS)
+              GOARCH=arm64 build darwin-arm64 ''
+              GOARCH=amd64 CGO_CFLAGS="-arch x86_64" CGO_LDFLAGS="-arch x86_64" build darwin-amd64 ''
+              ;;
+          esac
       - uses: actions/upload-artifact@v4
         with:
-          name: gui-${{ matrix.label }}
+          name: gui-${{ runner.os }}
           path: out/*
 
   # 推送 v* 標籤時，把所有產物附到 GitHub Release。

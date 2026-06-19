@@ -1,0 +1,77 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # 命令列版：純 Go，無 CGO，一台 runner 交叉編譯所有平台。
+  cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: 交叉編譯 CLI（全平台）
+        run: ./build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-binaries
+          path: dist/*
+
+  # GUI 版：Fyne 需要 CGO 與系統圖形函式庫，在各平台原生 runner 上編譯。
+  gui:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest, label: linux-amd64,  ext: '' }
+          - { runner: macos-14,      label: darwin-arm64, ext: '' }
+          - { runner: macos-13,      label: darwin-amd64, ext: '' }
+          - { runner: windows-latest, label: windows-amd64, ext: '.exe' }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: 安裝 Linux 圖形相依
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
+      - name: 編譯 GUI
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          mkdir -p out
+          go build -trimpath -ldflags "-s -w" -o "out/server-gui-${{ matrix.label }}${{ matrix.ext }}" ./cmd/server-gui
+          go build -trimpath -ldflags "-s -w" -o "out/client-gui-${{ matrix.label }}${{ matrix.ext }}" ./cmd/client-gui
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gui-${{ matrix.label }}
+          path: out/*
+
+  # 推送 v* 標籤時，把所有產物附到 GitHub Release。
+  release:
+    needs: [cli, gui]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: 建立 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "${{ github.ref_name }}" artifacts/* --repo "${{ github.repository }}" --generate-notes
